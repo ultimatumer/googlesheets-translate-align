@@ -1,0 +1,29 @@
+{
+  "timeZone": "Europe/Istanbul",
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/script.container.ui",
+    "https://www.googleapis.com/auth/script.external_request",
+    "https://www.googleapis.com/auth/script.scriptapp"
+  ],
+  "urlFetchWhitelist": [
+    "https://api.deepl.com/*",
+    "https://api.deepl.com/v2/translate",
+    "https://api-free.deepl.com/v2/translate"
+  ],
+  "addOns": {
+    "common": {
+      "name": "Translate & Align",
+      "useLocaleFromApp": true,
+      "logoUrl": "https://www.gstatic.com/images/branding/product/1x/apps_script_64dp.png"
+    },
+    "sheets": {
+      "homepageTrigger": {
+        "runFunction": "onHomepage",
+        "enabled": true
+      }
+    }
+  }
+}

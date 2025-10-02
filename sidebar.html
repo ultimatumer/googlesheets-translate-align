@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    :root { --pad: 10px; --gripw: 8px; }
+    html, body { height:100%; }
+    body { font-family: Arial, sans-serif; margin:0; padding:0; }
+    .wrap { position:relative; min-height:100%; padding: var(--pad); box-sizing:border-box; }
+    .resizer { position:absolute; left:0; top:0; bottom:0; width: var(--gripw); cursor: col-resize;
+      background: linear-gradient(to right, rgba(0,0,0,0.08), transparent); }
+    .resizer:after { content:'↔'; position:absolute; top:50%; left:0; transform:translate(-2px,-50%);
+      font-size:12px; color:#666; pointer-events:none; }
+    h3 { margin:0 0 8px 0; }
+    label { display:block; margin-top:10px; font-weight:600; }
+    input[type="text"], select { width:100%; padding:6px; box-sizing:border-box; }
+    .btn { margin-top:12px; padding:8px 10px; width:100%; cursor:pointer; }
+    .mini { padding:6px 8px; width:auto; }
+    .hint { font-size:12px; color:#333; margin-top:6px; }
+    .row { display:flex; gap:8px; align-items:flex-end; }
+    .row > div { flex:1; }
+    .bar { height:8px; background:#eee; border-radius:4px; overflow:hidden; margin-top:8px; }
+    .bar > div { height:8px; background:#4caf50; width:0; transition: width .2s; }
+    .card { background:#fff; border:1px solid #ddd; border-radius:10px; padding:12px; }
+    .scroll-box { max-height: 48vh; overflow:auto; border:1px solid #eee; border-radius:8px; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { border-bottom:1px solid #eee; padding:6px; font-size:13px; vertical-align:top; }
+    th { background:#fafafa; text-align:left; position:sticky; top:0; }
+    .controls-inline { display:flex; gap:8px; }
+    .ok { color:#0a0; font-weight:600; }
+    .err { color:#b00; font-weight:600; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="resizer" id="resizer" title="Потяни, чтобы изменить ширину (двойной клик — сброс)"></div>
+
+    <h3>Translate & Align</h3>
+    <div class="hint" id="deeplState">Проверка ключей DeepL…</div>
+
+    <label>Sheet name
+      <input id="sheetName" type="text" placeholder="Лист1" onblur="loadHeaders()">
+    </label>
+
+    <div class="row">
+      <div>
+        <label>Source header (эталонная колонка)
+          <input id="sourceHeader" type="text" placeholder="EN / От технарей / От редакторов">
+        </label>
+        <div class="hint">Если колонка EN заполнена — она берётся как источник автоматически.</div>
+      </div>
+      <div><button class="btn" onclick="detectSource()">Detect</button></div>
+    </div>
+
+    <div id="manualChooser" style="display:none">
+      <label>Не нашли автоматически — выбери вручную
+        <select id="sourceSelect" onchange="copySelect()"></select>
+      </label>
+    </div>
+
+    <label>Target columns (через запятую)
+      <input id="targets" type="text" placeholder="DE,FR,ES,PT,IT,GR,PL,HU,ID,CH,EN">
+    </label>
+
+    <label>Language map (опционально, JSON)
+      <input id="langMap" type="text" placeholder='{"CH":"ZH-HANT","GR":"EL","EN":"EN"}'>
+      <div class="hint">Если оставить пустым — карта заполнится автоматически (CH→ZH-HANT, GR→EL, EN→EN).</div>
+    </label>
+
+    <label><input id="autoTranslate" type="checkbox" checked> Auto-translate from source via DeepL</label>
+    <label><input id="fillMissing" type="checkbox" checked> Fill missing rows via DeepL</label>
+    <label><input id="strict" type="checkbox" checked> <b>Strict 1:1 (don't add columns)</b></label>
+
+    <label>Rows per cycle (batch)
+      <input id="batchRows" type="text" value="150">
+    </label>
+
+    <label>Write to new sheet
+      <input id="writeBack" type="text" value="Aligned">
+    </label>
+
+    <div class="row">
+      <div><button class="btn" onclick="run()">Run</button></div>
+      <div><button class="btn" onclick="toggleGlossary()">Глоссарий</button></div>
+    </div>
+
+    <div class="bar"><div id="pbar"></div></div>
+    <div id="status" class="hint"></div>
+    <hr>
+
+    <!-- DeepL diagnostics -->
+    <div class="card" style="margin-top:8px;">
+      <div class="row">
+        <div style="flex:0 0 auto;"><button class="mini" onclick="checkDeepL()">Check DeepL</button></div>
+        <div class="hint" id="deeplHelp">Не забудь добавить ключи DeepL в Свойства скрипта (Script Properties): <code>DEEPL_KEYS</code> = <i>KEY1,KEY2</i>.</div>
+      </div>
+      <div id="diag" class="mono" style="margin-top:6px; white-space:pre-wrap;"></div>
+    </div>
+
+    <!-- Glossary -->
+    <div id="gCard" class="card" style="display:none; margin-top:10px;">
+      <h3 style="margin-top:0">Глоссарий</h3>
+      <p class="hint">Зафиксируй корпоративные переводы: выбери целевой язык и укажи замену. Правила применяются к результатам перевода и к выровненным значениям.</p>
+
+      <div class="row">
+        <div>
+          <label>Target lang (например, DE)
+            <input id="gTgt" type="text" placeholder="DE">
+          </label>
+        </div>
+        <div>
+          <label>Слово/фраза (из перевода)
+            <input id="gFrom" type="text" placeholder="Drawing Dog">
+          </label>
+        </div>
+        <div>
+          <label>Заменить на
+            <input id="gTo" type="text" placeholder="Zeichenhund">
+          </label>
+        </div>
+        <div style="align-self:flex-end;">
+          <div class="controls-inline">
+            <button class="mini" onclick="addGlossary()">Добавить</button>
+            <button class="mini" onclick="saveGlossary()">Сохранить</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Source lang (опц.)
+            <input id="gSrc" type="text" placeholder="EN">
+          </label>
+        </div>
+        <div style="flex:0 0 auto; align-self:flex-end;">
+          <button class="mini" onclick="toggleGlossary()">Скрыть</button>
+        </div>
+      </div>
+
+      <div class="scroll-box">
+        <table id="gTable">
+          <thead>
+            <tr><th>#</th><th>tgtLang</th><th>srcLang</th><th>from</th><th>to</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /wrap -->
+
+  <script>
+    let cachedHeaders = [];
+    let currentJob = null;
+    let glossary = [];
+    const DEFAULT_WIDTH = 320, MIN_WIDTH = 260, MAX_WIDTH = 900;
+
+    document.addEventListener('DOMContentLoaded', function init(){
+      google.script.run.withSuccessHandler(function(res){
+        const state = document.getElementById('deeplState');
+        const help = document.getElementById('deeplHelp');
+        if (res.hasKeys) { state.innerHTML = '<b class="ok">Готов к работе 😎</b>'; help.style.display = 'none'; }
+        else { state.innerHTML = ''; help.style.display = 'block'; }
+      }).checkDeepLKeys();
+
+      google.script.run.withSuccessHandler(function(list){
+        glossary = list || []; renderGlossary();
+      }).glossaryList();
+
+      setupResizer();
+    });
+
+    /* Resize sidebar */
+    function setupResizer(){
+      const grip = document.getElementById('resizer');
+      let startX=0, startW=0, dragging=false;
+      grip.addEventListener('mousedown', e => { dragging=true; startX=e.clientX; startW=window.innerWidth; document.body.style.userSelect='none'; });
+      window.addEventListener('mousemove', e => {
+        if (!dragging) return;
+        const dx = startX - e.clientX;
+        let w = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, startW + dx));
+        try { google.script.host.setWidth(w); } catch(_){}
+      });
+      window.addEventListener('mouseup', () => { dragging=false; document.body.style.userSelect=''; });
+      grip.addEventListener('dblclick', () => { try { google.script.host.setWidth(DEFAULT_WIDTH); } catch(_){} });
+    }
+
+    /* DeepL diagnostics */
+    function checkDeepL(){
+      const box = document.getElementById('diag');
+      box.textContent = 'Checking…';
+      google.script.run.withSuccessHandler(function(res){
+        const lines = [];
+        if (!res || !res.health) { box.textContent = 'No result'; return; }
+        const h = res.health;
+        lines.push('Health: ' + (h.ok ? 'OK' : 'ISSUES'));
+        (h.items || []).forEach(it => {
+          lines.push(
+            `- ${it.key} @ ${it.endpoint}\n  usage: ${it.usage_code}  translate: ${it.translate_code}`
+          );
+        });
+        if (res.last){
+          lines.push('\nLast DeepL error:');
+          lines.push(`  time: ${res.last.ts}`);
+          lines.push(`  where: ${res.last.where}`);
+          lines.push(`  key: ${res.last.key}`);
+          lines.push(`  code: ${res.last.code}`);
+        }
+        box.textContent = lines.join('\n');
+      }).getDeepLDashboard();
+    }
+
+    function loadHeaders(){
+      const sheetName = document.getElementById('sheetName').value.trim();
+      if(!sheetName) return;
+      google.script.run.withSuccessHandler(function(res){
+        cachedHeaders = res.headers || [];
+        const sel = document.getElementById('sourceSelect');
+        sel.innerHTML = '';
+        cachedHeaders.forEach(h => { const opt = document.createElement('option'); opt.value=h; opt.textContent=h; sel.appendChild(opt); });
+      }).listHeaders(sheetName);
+    }
+    function detectSource(){
+      const sheetName = document.getElementById('sheetName').value.trim();
+      if(!sheetName){ alert('Укажи Sheet name'); return; }
+      google.script.run.withSuccessHandler(function(res){
+        if (res.found) {
+          document.getElementById('sourceHeader').value = res.found;
+          document.getElementById('manualChooser').style.display = 'none';
+          setStatus('Detected: ' + res.found + (res.enHasData ? ' (EN with data)' : ''));
+        } else {
+          const sel = document.getElementById('sourceSelect');
+          sel.innerHTML = '';
+          (res.headers||[]).forEach(h => { const opt = document.createElement('option'); opt.value=h; opt.textContent=h; sel.appendChild(opt); });
+          document.getElementById('manualChooser').style.display = 'block';
+          setStatus('Не нашли эталон — выбери колонку вручную.');
+        }
+      }).detectSourceServer(sheetName);
+    }
+    function copySelect(){ document.getElementById('sourceHeader').value = document.getElementById('sourceSelect').value; }
+
+    function run(){
+      const targetsRaw = document.getElementById('targets').value.split(',').map(s=>s.trim()).filter(Boolean);
+      const langMapTxt = document.getElementById('langMap').value.trim();
+      const cfg = {
+        sheetName: document.getElementById('sheetName').value.trim(),
+        sourceHeader: document.getElementById('sourceHeader').value.trim(),
+        autoDetect: !document.getElementById('sourceHeader').value.trim(),
+        targets: targetsRaw,
+        autoTranslate: document.getElementById('autoTranslate').checked,
+        fillMissing: document.getElementById('fillMissing').checked,
+        strict: document.getElementById('strict').checked,
+        batchRows: document.getElementById('batchRows').value.trim(),
+        writeBack: document.getElementById('writeBack').value.trim(),
+        langMap: parseMapOrNull(langMapTxt)
+      };
+      setStatus('Starting…');
+      document.getElementById('pbar').style.width = '0%';
+      google.script.run.withSuccessHandler(function(res){
+        currentJob = res.jobId;
+        setStatus('Created sheet: ' + res.outName + '. Processing…');
+        tick();
+      }).withFailureHandler(function(err){
+        setStatus('Error: ' + err.message);
+      }).startJob(cfg);
+    }
+    function tick(){
+      if (!currentJob) return;
+      google.script.run.withSuccessHandler(function(res){
+        const p = Math.round(100 * (res.cursor || 0) / (res.total || 1));
+        document.getElementById('pbar').style.width = p + '%';
+        setStatus(res.done ? ('Done. Created sheet: ' + (res.outName||'')) : ('Processing… ' + p + '%'));
+        if (!res.done) { setTimeout(tick, 250); } else { currentJob = null; }
+      }).withFailureHandler(function(err){
+        setStatus('Error: ' + err.message);
+        currentJob = null;
+      }).processJob(currentJob);
+    }
+
+    function parseMapOrNull(txt){
+      if (!txt) return null;
+      try { return JSON.parse(txt); } catch(e){ alert('Bad JSON in Language map'); throw e; }
+    }
+    function setStatus(t){ document.getElementById('status').innerText = t; }
+
+    /* Glossary UI */
+    function toggleGlossary(){
+      const el = document.getElementById('gCard');
+      el.style.display = (el.style.display === 'none' || !el.style.display) ? 'block' : 'none';
+    }
+    function addGlossary(){
+      const tgt = document.getElementById('gTgt').value.trim().toUpperCase();
+      const src = document.getElementById('gSrc').value.trim().toUpperCase();
+      const from = document.getElementById('gFrom').value.trim();
+      const to = document.getElementById('gTo').value.trim();
+      if (!tgt || !from || !to){ alert('Укажи target, from, to'); return; }
+      glossary.push({tgtLang:tgt, srcLang:(src||undefined), from:from, to:to});
+      renderGlossary(); document.getElementById('gFrom').value=''; document.getElementById('gTo').value='';
+    }
+    function removeGlossary(idx){ glossary.splice(idx,1); renderGlossary(); }
+    function renderGlossary(){
+      const tb = document.querySelector('#gTable tbody');
+      tb.innerHTML = '';
+      glossary.forEach((g,i)=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>'+(i+1)+'</td>'+
+          '<td>'+esc(g.tgtLang||'')+'</td>'+
+          '<td>'+esc(g.srcLang||'')+'</td>'+
+          '<td>'+esc(g.from||'')+'</td>'+
+          '<td>'+esc(g.to||'')+'</td>'+
+          '<td><button class="mini" onclick="removeGlossary('+i+')">Удалить</button></td>';
+        tb.appendChild(tr);
+      });
+    }
+    function saveGlossary(){
+      google.script.run.withSuccessHandler(function(res){
+        setStatus('Glossary saved ('+res.count+')');
+      }).withFailureHandler(function(err){
+        alert('Save failed: ' + err.message);
+      }).glossarySave(glossary);
+    }
+    function esc(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+  </script>
+</body>
+</html>
