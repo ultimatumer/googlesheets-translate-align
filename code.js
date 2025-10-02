@@ -1,3 +1,9 @@
+/*
+ * googlesheets-translate-align
+ * Copyright (c) 2025 Aleksandr Zhdanov
+ * Licensed under the MIT
+ * See LICENSE and NOTICE files for details.
+ */
 /***** UI *****/
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -511,3 +517,4 @@ function openSidebar(e) {
   showSidebar();
   return CardService.newActionResponseBuilder().build();
 }
+
